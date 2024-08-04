@@ -4,7 +4,7 @@
 // - protoc             v5.27.1
 // source: controller.proto
 
-package proto
+package pb
 
 import (
 	context "context"
@@ -19,12 +19,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Controller_Ping_FullMethodName            = "/Controller/ping"
-	Controller_RegisterAgent_FullMethodName   = "/Controller/registerAgent"
-	Controller_UnregisterAgent_FullMethodName = "/Controller/unregisterAgent"
-	Controller_GetTask_FullMethodName         = "/Controller/getTask"
-	Controller_StreamingLog_FullMethodName    = "/Controller/streamingLog"
-	Controller_Event_FullMethodName           = "/Controller/event"
+	Controller_Ping_FullMethodName             = "/Controller/ping"
+	Controller_RegisterAgent_FullMethodName    = "/Controller/registerAgent"
+	Controller_UnregisterAgent_FullMethodName  = "/Controller/unregisterAgent"
+	Controller_ListenTask_FullMethodName       = "/Controller/listenTask"
+	Controller_NotifyTaskResult_FullMethodName = "/Controller/notifyTaskResult"
+	Controller_StreamTaskLog_FullMethodName    = "/Controller/streamTaskLog"
+	Controller_StreamEvent_FullMethodName      = "/Controller/streamEvent"
 )
 
 // ControllerClient is the client API for Controller service.
@@ -32,11 +33,12 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ControllerClient interface {
 	Ping(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error)
-	RegisterAgent(ctx context.Context, in *RegisterAgentRequest, opts ...grpc.CallOption) (*RegisterAgentResponse, error)
+	RegisterAgent(ctx context.Context, in *AgentId, opts ...grpc.CallOption) (*Empty, error)
 	UnregisterAgent(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error)
-	GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*GetTaskResponse, error)
-	StreamingLog(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Log, Empty], error)
-	Event(ctx context.Context, in *Event, opts ...grpc.CallOption) (*Empty, error)
+	ListenTask(ctx context.Context, in *Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Task], error)
+	NotifyTaskResult(ctx context.Context, in *TaskResult, opts ...grpc.CallOption) (*Empty, error)
+	StreamTaskLog(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Log, Empty], error)
+	StreamEvent(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Event, Empty], error)
 }
 
 type controllerClient struct {
@@ -57,9 +59,9 @@ func (c *controllerClient) Ping(ctx context.Context, in *Empty, opts ...grpc.Cal
 	return out, nil
 }
 
-func (c *controllerClient) RegisterAgent(ctx context.Context, in *RegisterAgentRequest, opts ...grpc.CallOption) (*RegisterAgentResponse, error) {
+func (c *controllerClient) RegisterAgent(ctx context.Context, in *AgentId, opts ...grpc.CallOption) (*Empty, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(RegisterAgentResponse)
+	out := new(Empty)
 	err := c.cc.Invoke(ctx, Controller_RegisterAgent_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -77,19 +79,38 @@ func (c *controllerClient) UnregisterAgent(ctx context.Context, in *Empty, opts 
 	return out, nil
 }
 
-func (c *controllerClient) GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*GetTaskResponse, error) {
+func (c *controllerClient) ListenTask(ctx context.Context, in *Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Task], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetTaskResponse)
-	err := c.cc.Invoke(ctx, Controller_GetTask_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Controller_ServiceDesc.Streams[0], Controller_ListenTask_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[Empty, Task]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Controller_ListenTaskClient = grpc.ServerStreamingClient[Task]
+
+func (c *controllerClient) NotifyTaskResult(ctx context.Context, in *TaskResult, opts ...grpc.CallOption) (*Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, Controller_NotifyTaskResult_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *controllerClient) StreamingLog(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Log, Empty], error) {
+func (c *controllerClient) StreamTaskLog(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Log, Empty], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Controller_ServiceDesc.Streams[0], Controller_StreamingLog_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Controller_ServiceDesc.Streams[1], Controller_StreamTaskLog_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -98,28 +119,32 @@ func (c *controllerClient) StreamingLog(ctx context.Context, opts ...grpc.CallOp
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Controller_StreamingLogClient = grpc.ClientStreamingClient[Log, Empty]
+type Controller_StreamTaskLogClient = grpc.ClientStreamingClient[Log, Empty]
 
-func (c *controllerClient) Event(ctx context.Context, in *Event, opts ...grpc.CallOption) (*Empty, error) {
+func (c *controllerClient) StreamEvent(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Event, Empty], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Empty)
-	err := c.cc.Invoke(ctx, Controller_Event_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Controller_ServiceDesc.Streams[2], Controller_StreamEvent_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &grpc.GenericClientStream[Event, Empty]{ClientStream: stream}
+	return x, nil
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Controller_StreamEventClient = grpc.ClientStreamingClient[Event, Empty]
 
 // ControllerServer is the server API for Controller service.
 // All implementations must embed UnimplementedControllerServer
 // for forward compatibility.
 type ControllerServer interface {
 	Ping(context.Context, *Empty) (*Empty, error)
-	RegisterAgent(context.Context, *RegisterAgentRequest) (*RegisterAgentResponse, error)
+	RegisterAgent(context.Context, *AgentId) (*Empty, error)
 	UnregisterAgent(context.Context, *Empty) (*Empty, error)
-	GetTask(context.Context, *GetTaskRequest) (*GetTaskResponse, error)
-	StreamingLog(grpc.ClientStreamingServer[Log, Empty]) error
-	Event(context.Context, *Event) (*Empty, error)
+	ListenTask(*Empty, grpc.ServerStreamingServer[Task]) error
+	NotifyTaskResult(context.Context, *TaskResult) (*Empty, error)
+	StreamTaskLog(grpc.ClientStreamingServer[Log, Empty]) error
+	StreamEvent(grpc.ClientStreamingServer[Event, Empty]) error
 	mustEmbedUnimplementedControllerServer()
 }
 
@@ -133,20 +158,23 @@ type UnimplementedControllerServer struct{}
 func (UnimplementedControllerServer) Ping(context.Context, *Empty) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Ping not implemented")
 }
-func (UnimplementedControllerServer) RegisterAgent(context.Context, *RegisterAgentRequest) (*RegisterAgentResponse, error) {
+func (UnimplementedControllerServer) RegisterAgent(context.Context, *AgentId) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RegisterAgent not implemented")
 }
 func (UnimplementedControllerServer) UnregisterAgent(context.Context, *Empty) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UnregisterAgent not implemented")
 }
-func (UnimplementedControllerServer) GetTask(context.Context, *GetTaskRequest) (*GetTaskResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetTask not implemented")
+func (UnimplementedControllerServer) ListenTask(*Empty, grpc.ServerStreamingServer[Task]) error {
+	return status.Errorf(codes.Unimplemented, "method ListenTask not implemented")
 }
-func (UnimplementedControllerServer) StreamingLog(grpc.ClientStreamingServer[Log, Empty]) error {
-	return status.Errorf(codes.Unimplemented, "method StreamingLog not implemented")
+func (UnimplementedControllerServer) NotifyTaskResult(context.Context, *TaskResult) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NotifyTaskResult not implemented")
 }
-func (UnimplementedControllerServer) Event(context.Context, *Event) (*Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Event not implemented")
+func (UnimplementedControllerServer) StreamTaskLog(grpc.ClientStreamingServer[Log, Empty]) error {
+	return status.Errorf(codes.Unimplemented, "method StreamTaskLog not implemented")
+}
+func (UnimplementedControllerServer) StreamEvent(grpc.ClientStreamingServer[Event, Empty]) error {
+	return status.Errorf(codes.Unimplemented, "method StreamEvent not implemented")
 }
 func (UnimplementedControllerServer) mustEmbedUnimplementedControllerServer() {}
 func (UnimplementedControllerServer) testEmbeddedByValue()                    {}
@@ -188,7 +216,7 @@ func _Controller_Ping_Handler(srv interface{}, ctx context.Context, dec func(int
 }
 
 func _Controller_RegisterAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RegisterAgentRequest)
+	in := new(AgentId)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -200,7 +228,7 @@ func _Controller_RegisterAgent_Handler(srv interface{}, ctx context.Context, dec
 		FullMethod: Controller_RegisterAgent_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ControllerServer).RegisterAgent(ctx, req.(*RegisterAgentRequest))
+		return srv.(ControllerServer).RegisterAgent(ctx, req.(*AgentId))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -223,48 +251,48 @@ func _Controller_UnregisterAgent_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Controller_GetTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetTaskRequest)
-	if err := dec(in); err != nil {
-		return nil, err
+func _Controller_ListenTask_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(Empty)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
 	}
-	if interceptor == nil {
-		return srv.(ControllerServer).GetTask(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Controller_GetTask_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ControllerServer).GetTask(ctx, req.(*GetTaskRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Controller_StreamingLog_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(ControllerServer).StreamingLog(&grpc.GenericServerStream[Log, Empty]{ServerStream: stream})
+	return srv.(ControllerServer).ListenTask(m, &grpc.GenericServerStream[Empty, Task]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Controller_StreamingLogServer = grpc.ClientStreamingServer[Log, Empty]
+type Controller_ListenTaskServer = grpc.ServerStreamingServer[Task]
 
-func _Controller_Event_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Event)
+func _Controller_NotifyTaskResult_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TaskResult)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ControllerServer).Event(ctx, in)
+		return srv.(ControllerServer).NotifyTaskResult(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Controller_Event_FullMethodName,
+		FullMethod: Controller_NotifyTaskResult_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ControllerServer).Event(ctx, req.(*Event))
+		return srv.(ControllerServer).NotifyTaskResult(ctx, req.(*TaskResult))
 	}
 	return interceptor(ctx, in, info, handler)
 }
+
+func _Controller_StreamTaskLog_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ControllerServer).StreamTaskLog(&grpc.GenericServerStream[Log, Empty]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Controller_StreamTaskLogServer = grpc.ClientStreamingServer[Log, Empty]
+
+func _Controller_StreamEvent_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ControllerServer).StreamEvent(&grpc.GenericServerStream[Event, Empty]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Controller_StreamEventServer = grpc.ClientStreamingServer[Event, Empty]
 
 // Controller_ServiceDesc is the grpc.ServiceDesc for Controller service.
 // It's only intended for direct use with grpc.RegisterService,
@@ -286,18 +314,24 @@ var Controller_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Controller_UnregisterAgent_Handler,
 		},
 		{
-			MethodName: "getTask",
-			Handler:    _Controller_GetTask_Handler,
-		},
-		{
-			MethodName: "event",
-			Handler:    _Controller_Event_Handler,
+			MethodName: "notifyTaskResult",
+			Handler:    _Controller_NotifyTaskResult_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "streamingLog",
-			Handler:       _Controller_StreamingLog_Handler,
+			StreamName:    "listenTask",
+			Handler:       _Controller_ListenTask_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "streamTaskLog",
+			Handler:       _Controller_StreamTaskLog_Handler,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "streamEvent",
+			Handler:       _Controller_StreamEvent_Handler,
 			ClientStreams: true,
 		},
 	},

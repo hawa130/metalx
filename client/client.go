@@ -1,30 +1,41 @@
 package main
 
 import (
-	"flag"
+	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"log"
+	"time"
 
-	"github.com/hawa130/metalx/gutils"
+	"github.com/google/uuid"
+	"github.com/hawa130/metalx/client/config"
+	"github.com/hawa130/metalx/pb"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 )
 
 var (
-	tls                = flag.Bool("tls", false, "Connection uses TLS if true, else plain TCP")
-	caFile             = flag.String("ca_file", "", "The file containing the CA root cert file")
-	serverAddr         = flag.String("addr", "localhost:50051", "The server address in the format of host:port")
-	serverHostOverride = flag.String("server_host_override", "x.test.example.com", "The server name used to verify the hostname returned by the TLS handshake")
+	sessionID string
 )
 
 func main() {
-	flag.Parse()
+	cfg := config.Config()
+
 	var opts []grpc.DialOption
-	if *tls {
-		if *caFile == "" {
-			*caFile = gutils.Path("x509/ca_cert.pem")
-		}
-		creds, err := credentials.NewClientTLSFromFile(*caFile, *serverHostOverride)
+
+	if cfg.Auth.EnableTLS {
+		keypair, err := tls.X509KeyPair([]byte(cfg.Auth.PublicKey), []byte(cfg.Auth.PrivateKey))
+		caCertPool := x509.NewCertPool()
+		caCertPool.AppendCertsFromPEM([]byte(cfg.Auth.CACert))
+		creds := credentials.NewTLS(&tls.Config{
+			Certificates: []tls.Certificate{keypair},
+			RootCAs:      caCertPool,
+		})
 		if err != nil {
 			log.Fatalf("Failed to create TLS credentials: %v", err)
 		}
@@ -33,11 +44,103 @@ func main() {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 
-	conn, err := grpc.NewClient(*serverAddr, opts...)
+	opts = append(opts, grpc.WithUnaryInterceptor(func(
+		ctx context.Context,
+		method string,
+		req, reply interface{},
+		cc *grpc.ClientConn,
+		invoker grpc.UnaryInvoker,
+		opts ...grpc.CallOption,
+	) error {
+		p, ok := peer.FromContext(ctx)
+		if !ok {
+			return status.Errorf(codes.Unauthenticated, "could not find p info")
+		}
+
+		tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
+		if !ok {
+			return status.Errorf(codes.Unauthenticated, "unexpected p transport credentials")
+		}
+
+		// Check controller's certificate CN
+		for _, chain := range tlsInfo.State.VerifiedChains {
+			for _, cert := range chain {
+				cn := cert.Subject.CommonName
+				if cn == "Controller" {
+					return invoker(ctx, method, req, reply, cc, opts...)
+				}
+			}
+		}
+		return status.Errorf(codes.Unauthenticated, "invalid client certificate CN")
+	}))
+
+	opts = append(opts, grpc.WithUnaryInterceptor(func(
+		ctx context.Context,
+		method string,
+		req, reply interface{},
+		cc *grpc.ClientConn,
+		invoker grpc.UnaryInvoker,
+		opts ...grpc.CallOption,
+	) error {
+		if sessionID != "" {
+			ctx = metadata.AppendToOutgoingContext(ctx, "session-id", sessionID)
+		}
+		var header metadata.MD
+		err := invoker(ctx, method, req, reply, cc, append(opts, grpc.Header(&header))...)
+		if err != nil {
+			log.Printf("Error during handle rpc invoke: %v", err)
+		}
+		if ids := header["set-session-id"]; len(ids) > 0 {
+			sessionID = ids[0]
+		}
+		return err
+	}))
+
+	opts = append(opts, grpc.WithStreamInterceptor(func(
+		ctx context.Context,
+		desc *grpc.StreamDesc,
+		cc *grpc.ClientConn,
+		method string,
+		streamer grpc.Streamer,
+		opts ...grpc.CallOption,
+	) (grpc.ClientStream, error) {
+		if sessionID != "" {
+			ctx = metadata.AppendToOutgoingContext(ctx, "session-id", sessionID)
+		}
+		var header metadata.MD
+		clientStream, err := streamer(ctx, desc, cc, method, append(opts, grpc.Header(&header))...)
+		if err != nil {
+			return nil, err
+		}
+		if ids := header["session-id"]; len(ids) > 0 {
+			sessionID = ids[0]
+		}
+		return clientStream, nil
+	}))
+
+	conn, err := grpc.NewClient(cfg.ControllerAddr, opts...)
 	if err != nil {
 		log.Fatalf("fail to dial: %v", err)
 	}
-	defer conn.Close()
-	//client := pb.NewControllerClient(conn)
+	defer func(conn *grpc.ClientConn) {
+		err := conn.Close()
+		if err != nil {
+			log.Fatalf("failed to close grpc client: %v", err)
+		}
+	}(conn)
 
+	client := pb.NewControllerClient(conn)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Hour)
+	defer cancel()
+
+	fakeID := uuid.New()
+	fakeIDBytes, _ := fakeID.MarshalBinary()
+
+	_, err = client.RegisterAgent(ctx, &pb.AgentId{Id: fakeIDBytes})
+
+	if err != nil {
+		println("err: ", err.Error())
+	}
+	println("session id", sessionID)
 }

@@ -6,8 +6,8 @@ import (
 	"log"
 	"net"
 
-	"baremetalcloud/gutils"
-	pb "baremetalcloud/proto"
+	"github.com/hawa130/metalx/gutils"
+	pb "github.com/hawa130/metalx/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )

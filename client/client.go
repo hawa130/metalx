@@ -4,7 +4,7 @@ import (
 	"flag"
 	"log"
 
-	"baremetalcloud/gutils"
+	"github.com/hawa130/metalx/gutils"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"

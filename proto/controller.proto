@@ -2,7 +2,7 @@ syntax = "proto3";
 
 import "shared.proto";
 
-option go_package = "baremetalcloud/proto";
+option go_package = "github.com/hawa130/metalx/proto";
 
 service Controller { // Controller node, responsible for managing edge agents.
   rpc ping(Empty) returns (Empty) {} // Ping the controller, used to check if controller is online and reachable
